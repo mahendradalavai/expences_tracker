@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Reports — My Expenses</title>
+  <link rel="stylesheet" href="/theme.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-body)
+    }
+
+    .app {
+      max-width: 430px;
+      min-height: 100vh;
+      margin: auto;
+      padding-bottom: 96px
+    }
+
+    .nav-item {
+      color: var(--color-muted)
+    }
+
+    .nav-item.active {
+      color: var(--color-primary)
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+    <header class="px-5 pt-8 pb-5 flex justify-between items-center">
+      <div>
+        <p class="text-xs text-[var(--color-muted)]">YOUR MONEY, AT A GLANCE</p>
+        <h1 class="text-2xl font-bold mt-1">Reports</h1>
+      </div><a href="/" class="w-10 h-10 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] grid place-items-center">⌂</a>
+    </header>
+    
+    <div class="px-5" id="reports-content">
+      <!-- Dynamic content will be rendered here -->
+    </div>
+    
+    <div class="px-5">
+        <a href="/" class="mt-5 block text-center py-3 text-sm font-semibold text-[var(--color-primary)]">← Back to home</a>
+    </div>
+    
+    <nav class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[430px] bg-[var(--color-surface)] border-t border-[var(--color-line)] px-7 py-3 flex justify-between z-10">
+      <a class="nav-item flex flex-col items-center gap-1 text-[10px] font-semibold" href="/"><span class="text-xl">⌂</span>Home</a>
+      <a class="nav-item active flex flex-col items-center gap-1 text-[10px] font-semibold" href="/reports"><span class="text-xl">▥</span>Reports</a>
+      <a class="nav-item flex flex-col items-center gap-1 text-[10px] font-semibold" href="/add-expense"><span class="text-xl">＋</span>Add</a>
+      <a class="nav-item flex flex-col items-center gap-1 text-[10px] font-semibold" href="/categories"><span class="text-xl">◉</span>Categories</a>
+    </nav>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/js/config.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+    let currentDate = new Date();
+    let currentYear = currentDate.getFullYear();
+    let currentMonth = currentDate.getMonth() + 1;
+
+    const reportsContent = document.getElementById('reports-content');
+    
+    async function init() {
+      reportsContent.innerHTML = '<div class="py-10 text-center text-[var(--color-muted)] text-sm">Loading reports...</div>';
+      await loadData();
+      
+      subscribeExpenses((payload) => {
+        let shouldReload = false;
+        if (payload.new && payload.new.date) {
+            const dateObj = new Date(payload.new.date);
+            if (dateObj.getFullYear() === currentYear && (dateObj.getMonth() + 1) === currentMonth) {
+                shouldReload = true;
+            }
+        }
+        if (payload.old && payload.old.date) {
+            const dateObj = new Date(payload.old.date);
+            if (dateObj.getFullYear() === currentYear && (dateObj.getMonth() + 1) === currentMonth) {
+                shouldReload = true;
+            }
+        }
+        if (shouldReload) {
+            loadData();
+        }
+      });
+    }
+
+    async function changeMonth(offset) {
+      currentMonth += offset;
+      if (currentMonth > 12) {
+        currentMonth = 1;
+        currentYear++;
+      } else if (currentMonth < 1) {
+        currentMonth = 12;
+        currentYear--;
+      }
+      reportsContent.innerHTML = '<div class="py-10 text-center text-[var(--color-muted)] text-sm">Loading reports...</div>';
+      await loadData();
+    }
+
+    async function loadData() {
+      try {
+        const startStr = monthStartStr(currentYear, currentMonth);
+        const endStr = monthEndStr(currentYear, currentMonth);
+        
+        let prevYear = currentYear;
+        let prevMonth = currentMonth - 1;
+        if (prevMonth < 1) {
+            prevMonth = 12;
+            prevYear--;
+        }
+        const prevStartStr = monthStartStr(prevYear, prevMonth);
+        const prevEndStr = monthEndStr(prevYear, prevMonth);
+
+        const [expenses, prevExpenses] = await Promise.all([
+            fetchExpenses(startStr, endStr),
+            fetchExpenses(prevStartStr, prevEndStr)
+        ]);
+
+        render(expenses, prevExpenses);
+      } catch (err) {
+        console.error(err);
+        showToast('Failed to load reports', 'error');
+        reportsContent.innerHTML = '<div class="py-10 text-center text-red-500 text-sm">Error loading reports</div>';
+      }
+    }
+
+    function render(expenses, prevExpenses) {
+        const total = expenses.reduce((sum, exp) => sum + parseFloat(exp.amount), 0);
+        const prevTotal = prevExpenses.reduce((sum, exp) => sum + parseFloat(exp.amount), 0);
+        
+        let percentChangeStr = '0% vs Prev';
+        if (prevTotal > 0) {
+            const pct = ((total - prevTotal) / prevTotal) * 100;
+            const arrow = pct > 0 ? '↑' : (pct < 0 ? '↓' : '');
+            percentChangeStr = `${arrow} ${Math.abs(pct).toFixed(1)}% vs Prev`;
+        } else if (total > 0 && prevTotal === 0) {
+            percentChangeStr = `↑ 100% vs Prev`;
+        }
+
+        const now = new Date();
+        let daysElapsed = daysInMonth(currentYear, currentMonth);
+        if (currentYear === now.getFullYear() && currentMonth === (now.getMonth() + 1)) {
+            daysElapsed = Math.max(1, now.getDate());
+        }
+        const dailyAvg = total / daysElapsed;
+        const budgetLeft = Math.max(0, BUDGET - total);
+
+        const catMap = {};
+        expenses.forEach(exp => {
+            const cat = exp.categories;
+            if (!cat) return;
+            if (!catMap[cat.id]) {
+                catMap[cat.id] = { ...cat, total: 0, count: 0 };
+            }
+            catMap[cat.id].total += parseFloat(exp.amount);
+            catMap[cat.id].count += 1;
+        });
+
+        const sortedCats = Object.values(catMap).sort((a, b) => b.total - a.total);
+        let catsHtml = '';
+        if (sortedCats.length === 0) {
+            catsHtml = `<div class="text-center py-5 text-[var(--color-muted)] text-sm">No expenses this month</div>`;
+        } else {
+            catsHtml = sortedCats.map(cat => {
+                const pct = total > 0 ? ((cat.total / total) * 100).toFixed(0) : 0;
+                return \`
+                <article class="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] p-3.5">
+                  <div class="flex items-center gap-3"><span class="w-10 h-10 rounded-xl grid place-items-center" style="background-color: \${cat.color}20; font-size: 1.25rem">\${cat.icon || '📌'}</span>
+                    <div class="flex-1">
+                      <div class="flex justify-between"><b class="text-sm">\${cat.name}</b><b class="text-sm">₹\${formatCurrency(cat.total)}</b></div>
+                      <div class="flex justify-between mt-1.5"><span class="text-xs text-[var(--color-muted)]">\${pct}% of spending</span><span class="text-xs text-[var(--color-muted)]">\${cat.count} transaction\${cat.count > 1 ? 's' : ''}</span></div>
+                      <div class="h-1 bg-[var(--color-bg)] rounded mt-2">
+                        <div class="h-full rounded" style="width: \${pct}%; background-color: \${cat.color}"></div>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+                \`;
+            }).join('');
+        }
+
+        const daysInMon = daysInMonth(currentYear, currentMonth);
+        const segmentCount = 12;
+        const segmentSize = Math.ceil(daysInMon / segmentCount);
+        
+        let segments = Array(segmentCount).fill(0);
+        expenses.forEach(exp => {
+            const d = new Date(exp.date).getDate();
+            const segIdx = Math.min(Math.floor((d - 1) / segmentSize), segmentCount - 1);
+            segments[segIdx] += parseFloat(exp.amount);
+        });
+
+        const maxSegment = Math.max(...segments, 1);
+        
+        let barsHtml = '';
+        segments.forEach(amount => {
+            const heightPct = Math.max((amount / maxSegment) * 100, 5);
+            const isMax = amount === Math.max(...segments) && amount > 0;
+            const bgClass = isMax ? 'bg-[var(--color-primary)]' : 'bg-[#d8e8dc]';
+            barsHtml += \`<div class="flex-1 rounded-t-md \${bgClass}" style="height: \${heightPct}%"></div>\`;
+        });
+
+        const monthShort = monthYearLabel(currentYear, currentMonth).split(' ')[0].substring(0,3);
+        const labelsHtml = \`
+            <span>1 \${monthShort}</span>
+            <span>\${Math.floor(daysInMon/3)} \${monthShort}</span>
+            <span>\${Math.floor((daysInMon*2)/3)} \${monthShort}</span>
+            <span>\${daysInMon} \${monthShort}</span>
+        \`;
+
+        reportsContent.innerHTML = \`
+          <div class="flex items-center justify-between bg-[var(--color-surface)] border border-[var(--color-line)] rounded-2xl p-3 mb-4">
+            <button onclick="changeMonth(-1)" class="w-9 h-9 rounded-xl bg-[var(--color-bg)]">‹</button>
+            <div class="text-center">
+              <p class="font-bold">\${monthYearLabel(currentYear, currentMonth)}</p>
+              <p class="text-[10px] text-[var(--color-muted)]">MONTHLY OVERVIEW</p>
+            </div>
+            <button onclick="changeMonth(1)" class="w-9 h-9 rounded-xl bg-[var(--color-bg)]">›</button>
+          </div>
+          <section class="bg-[var(--color-primary)] rounded-[var(--radius)] p-5 text-[var(--color-primary-contrast)]">
+            <p class="text-sm text-white/75">Total expenses</p>
+            <div class="flex justify-between items-end mt-1">
+              <p class="text-4xl font-bold">₹\${formatCurrency(total)}</p><span class="text-xs rounded-full bg-white/15 px-3 py-1.5">\${percentChangeStr}</span>
+            </div>
+            <div class="mt-5 pt-4 border-t border-white/20 flex justify-between text-xs">
+              <div>
+                <p class="text-white/65">DAILY AVERAGE</p><b class="text-base">₹\${formatCurrency(dailyAvg)}</b>
+              </div>
+              <div class="text-right">
+                <p class="text-white/65">BUDGET LEFT</p><b class="text-base">₹\${formatCurrency(budgetLeft)}</b>
+              </div>
+            </div>
+          </section>
+          <section class="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-[var(--radius)] p-4 mt-4">
+            <div class="flex justify-between items-center">
+              <div>
+                <h2 class="font-bold">Spending trend</h2>
+                <p class="text-xs text-[var(--color-muted)] mt-1">Daily spend this month</p>
+              </div><span class="text-xs bg-[var(--color-bg)] rounded-lg px-2 py-1">\${monthYearLabel(currentYear, currentMonth).split(' ')[0]}⌄</span>
+            </div>
+            <div class="h-36 flex items-end justify-between gap-2 px-1 pt-5">
+              \${barsHtml}
+            </div>
+            <div class="flex justify-between text-[10px] text-[var(--color-muted)] mt-2">
+                \${labelsHtml}
+            </div>
+          </section>
+          <section class="mt-6">
+            <div class="flex justify-between items-center mb-3">
+              <h2 class="font-bold text-lg">By category</h2><button class="text-xs text-[var(--color-primary)] font-semibold">This month⌄</button>
+            </div>
+            <div class="space-y-2.5">
+              \${catsHtml}
+            </div>
+          </section>
+        \`;
+    }
+
+    window.changeMonth = changeMonth;
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

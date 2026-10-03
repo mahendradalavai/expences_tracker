@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Add expense — My Expenses</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/theme.css">
+  <style>
+    body {
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-body)
+    }
+
+    .app {
+      max-width: 430px;
+      min-height: 100vh;
+      margin: auto;
+      padding-bottom: 30px
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+    <header class="px-5 pt-8 pb-5 flex items-center gap-4"><a href="/" class="w-10 h-10 rounded-full bg-[var(--color-surface)] border border-[var(--color-line)] grid place-items-center text-xl">←</a>
+      <div>
+        <p id="headerDate" class="text-xs text-[var(--color-muted)]"></p>
+        <h1 class="text-xl font-bold">Add expense</h1>
+      </div>
+    </header>
+    <form id="expenseForm" class="px-5 space-y-5">
+      <section class="bg-[var(--color-primary)] text-[var(--color-primary-contrast)] rounded-[var(--radius)] p-5 text-center">
+        <label class="text-sm text-white/75">How much did you spend?</label>
+        <div class="flex justify-center items-center mt-2">
+          <span class="text-3xl mr-2 text-white/75">₹</span>
+          <input id="amountInput" type="number" placeholder="0" class="w-44 bg-transparent text-center text-5xl font-bold outline-none placeholder:text-white/60" />
+        </div>
+        <p class="text-xs text-white/65 mt-2">Enter the amount in Indian rupees</p>
+      </section>
+      
+      <section>
+        <div class="flex justify-between items-center mb-3">
+          <h2 class="font-bold">Category</h2>
+          <a class="text-sm text-[var(--color-primary)] font-semibold" href="/categories">Manage</a>
+        </div>
+        <div id="categoryGrid" class="grid grid-cols-3 gap-2.5">
+          <!-- Categories injected here -->
+        </div>
+      </section>
+      
+      <section class="space-y-3">
+        <label class="block">
+          <span class="block text-sm font-bold mb-2">Description</span>
+          <input id="descInput" placeholder="What was this for?" class="w-full rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-4 text-sm outline-none" />
+        </label>
+        <label class="block">
+          <span class="block text-sm font-bold mb-2">Date</span>
+          <input id="dateInput" type="date" class="w-full rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-4 text-sm outline-none" />
+        </label>
+      </section>
+      
+      <section>
+        <h2 class="font-bold text-sm mb-3">Payment method</h2>
+        <div class="grid grid-cols-3 gap-2">
+          <button type="button" id="btn-cash" data-method="cash" class="payment-btn border-2 border-[var(--color-primary)] bg-[#e7f0e9] rounded-2xl py-3 text-sm font-semibold">💵 Cash</button>
+          <button type="button" id="btn-upi" data-method="upi" class="payment-btn border border-[var(--color-line)] bg-[var(--color-surface)] rounded-2xl py-3 text-sm font-semibold">📲 UPI</button>
+          <button type="button" id="btn-card" data-method="card" class="payment-btn border border-[var(--color-line)] bg-[var(--color-surface)] rounded-2xl py-3 text-sm font-semibold">💳 Card</button>
+        </div>
+      </section>
+      
+      <button id="saveBtn" type="submit" class="w-full mt-2 py-4 rounded-2xl bg-[var(--color-primary)] text-[var(--color-primary-contrast)] font-bold tracking-wide">SAVE EXPENSE</button>
+      <p class="text-center text-xs text-[var(--color-muted)]">Your spending, organized one day at a time.</p>
+    </form>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/js/config.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", async () => {
+      const headerDate = document.getElementById("headerDate");
+      const amountInput = document.getElementById("amountInput");
+      const categoryGrid = document.getElementById("categoryGrid");
+      const descInput = document.getElementById("descInput");
+      const dateInput = document.getElementById("dateInput");
+      const paymentBtns = document.querySelectorAll(".payment-btn");
+      const expenseForm = document.getElementById("expenseForm");
+      const saveBtn = document.getElementById("saveBtn");
+
+      let selectedCategoryId = null;
+      let selectedPayment = 'cash';
+      
+      // Parse URL params
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlCategoryId = urlParams.get('category');
+      const urlAmount = urlParams.get('amount');
+
+      if (urlAmount) amountInput.value = urlAmount;
+
+      // Set header date & default input date
+      headerDate.textContent = getDayLabel();
+      dateInput.value = todayStr();
+
+      // Render Categories
+      const renderCategories = (categories) => {
+        categoryGrid.innerHTML = "";
+        categories.forEach(cat => {
+          const isSelected = selectedCategoryId === cat.id;
+          const btnClasses = isSelected
+            ? "rounded-2xl p-3 bg-[#e7f0e9] border-2 border-[var(--color-primary)] text-center"
+            : "rounded-2xl p-3 bg-[var(--color-surface)] border border-[var(--color-line)] text-center";
+            
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = btnClasses;
+          btn.onclick = () => {
+            selectedCategoryId = cat.id;
+            renderCategories(categories);
+          };
+          btn.innerHTML = `
+            <span class="text-2xl">${cat.icon}</span>
+            <p class="text-xs font-semibold mt-1">${cat.name}</p>
+          `;
+          categoryGrid.appendChild(btn);
+        });
+
+        // Add "New category" button
+        const newCatLink = document.createElement("a");
+        newCatLink.href = "/categories";
+        newCatLink.className = "rounded-2xl p-3 bg-[var(--color-surface)] border border-dashed border-[#b7c4b9] text-center flex flex-col justify-center items-center";
+        newCatLink.innerHTML = `
+          <span class="text-2xl text-[var(--color-primary)]">＋</span>
+          <p class="text-xs font-semibold mt-1">New category</p>
+        `;
+        categoryGrid.appendChild(newCatLink);
+      };
+
+      // Load Categories
+      try {
+        const categories = await fetchCategories();
+        
+        // Handle pre-selected category
+        if (urlCategoryId && categories.some(c => c.id === urlCategoryId)) {
+          selectedCategoryId = urlCategoryId;
+        } else if (categories.length > 0) {
+          selectedCategoryId = categories[0].id;
+        }
+        
+        renderCategories(categories);
+      } catch (err) {
+        if(typeof showToast !== 'undefined') showToast("Error loading categories", "error");
+      }
+
+      // Payment method selection
+      const updatePaymentUI = () => {
+        paymentBtns.forEach(btn => {
+          if (btn.dataset.method === selectedPayment) {
+            btn.className = "payment-btn border-2 border-[var(--color-primary)] bg-[#e7f0e9] rounded-2xl py-3 text-sm font-semibold";
+          } else {
+            btn.className = "payment-btn border border-[var(--color-line)] bg-[var(--color-surface)] rounded-2xl py-3 text-sm font-semibold";
+          }
+        });
+      };
+      
+      paymentBtns.forEach(btn => {
+        btn.onclick = () => {
+          selectedPayment = btn.dataset.method;
+          updatePaymentUI();
+        };
+      });
+      updatePaymentUI();
+
+      // Form submission
+      expenseForm.onsubmit = async (e) => {
+        e.preventDefault();
+        
+        const amount = parseFloat(amountInput.value);
+        if (!amount || amount <= 0) {
+          return showToast("Please enter a valid amount", "error");
+        }
+        if (!selectedCategoryId) {
+          return showToast("Please select a category", "error");
+        }
+        
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving...";
+        saveBtn.classList.add("opacity-70");
+        
+        try {
+          await insertExpense({
+            amount,
+            description: descInput.value.trim(),
+            category_id: selectedCategoryId,
+            date: dateInput.value || todayStr(),
+            payment_method: selectedPayment
+          });
+          
+          showToast("Expense added successfully!", "success");
+          setTimeout(() => {
+            window.location.href = "/";
+          }, 800);
+        } catch (err) {
+          showToast("Error saving expense", "error");
+          saveBtn.disabled = false;
+          saveBtn.textContent = "SAVE EXPENSE";
+          saveBtn.classList.remove("opacity-70");
+        }
+      };
+    });
+  </script>
+</body>
+
+</html>
