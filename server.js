@@ -16,8 +16,67 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon'
 };
 
+function loadEnvFile(filePath) {
+  const env = {};
+  if (!fs.existsSync(filePath)) return env;
+
+  const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex === -1) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    let value = trimmed.slice(separatorIndex + 1).trim();
+
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    env[key] = value;
+  }
+
+  return env;
+}
+
+const ENV = loadEnvFile(path.join(ROOT, '.env'));
+
+function getEnvValue(key, fallback = '') {
+  const value = process.env[key] ?? ENV[key] ?? fallback;
+  return value === undefined ? fallback : value;
+}
+
+function renderConfigScript() {
+  const supabaseUrl = getEnvValue('SUPABASE_URL', 'https://your-project.supabase.co');
+  const supabaseAnonKey = getEnvValue('SUPABASE_ANON_KEY', '');
+  const monthlyBudget = Number(getEnvValue('MONTHLY_BUDGET', '15000')) || 15000;
+
+  return `window.APP_CONFIG = {
+  SUPABASE_URL: ${JSON.stringify(supabaseUrl)},
+  SUPABASE_ANON_KEY: ${JSON.stringify(supabaseAnonKey)},
+  MONTHLY_BUDGET: ${JSON.stringify(monthlyBudget)}
+};
+
+const SUPABASE_URL = window.APP_CONFIG.SUPABASE_URL;
+const SUPABASE_ANON_KEY = window.APP_CONFIG.SUPABASE_ANON_KEY;
+const MONTHLY_BUDGET = Number(window.APP_CONFIG.MONTHLY_BUDGET || 15000);
+`;
+}
+
 const server = http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
+
+  if (urlPath === '/js/config.js') {
+    res.writeHead(200, {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(renderConfigScript());
+    return;
+  }
+
   let safePath = path.normalize(urlPath).replace(/^(\.\.[\/\\])+/, '');
   let filePath = path.join(ROOT, safePath);
 
